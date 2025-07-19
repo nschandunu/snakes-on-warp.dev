@@ -9,11 +9,15 @@ Press 'q' to quit the game.
 import curses
 import random
 import time
+import json
+import os
 
 class SnakeGame:
     def __init__(self, stdscr):
         self.stdscr = stdscr
         self.height, self.width = stdscr.getmaxyx()
+        self.high_scores_file = "high_scores.json"
+        self.high_scores = self.load_high_scores()
         
         # Initialize colors
         curses.curs_set(0)  # Hide cursor
@@ -41,22 +45,72 @@ class SnakeGame:
         # Initial direction (moving right)
         self.direction = [0, 1]
         
-        # Generate first food
-        self.food = self.generate_food()
-        
-        # Score
+        # Score and level system
         self.score = 0
+        self.level = 1
+        self.score_for_next_level = 100  # Points needed for next level
         
         # Game speed (delay in seconds)
-        self.delay = 0.1
+        self.delay = 0.15
+        self.base_delay = 0.15
+        
+        # Power-ups system
+        self.power_ups = []
+        self.power_up_timer = 0
+        self.power_up_spawn_chance = 0.05  # 5% chance per food eaten
+        self.active_power_up = None
+        self.power_up_duration = 0
+        
+        # Obstacles for higher levels
+        self.obstacles = []
+        
+        # Initialize obstacles for level 1 (none)
+        self.generate_obstacles()
+        
+        # Generate first food (after obstacles are initialized)
+        self.food = self.generate_food()
         
     def generate_food(self):
         """Generate food at a random location not occupied by the snake"""
         while True:
             food_y = random.randint(self.box_y + 1, self.box_y + self.box_height - 2)
             food_x = random.randint(self.box_x + 1, self.box_x + self.box_width - 2)
-            if [food_y, food_x] not in self.snake:
+            if [food_y, food_x] not in self.snake and [food_y, food_x] not in self.obstacles:
                 return [food_y, food_x]
+    
+    def generate_power_up(self):
+        """Generate a power-up at a random location"""
+        power_up_types = [
+            {'type': 'slow', 'char': '🍏', 'color': 1, 'duration': 100},  # Slow-mo fruit
+            {'type': 'boost', 'char': '🚀', 'color': 2, 'duration': 50},   # Speed boost
+            {'type': 'trap', 'char': '💣', 'color': 6, 'duration': 0}      # Trap
+        ]
+        
+        while True:
+            y = random.randint(self.box_y + 1, self.box_y + self.box_height - 2)
+            x = random.randint(self.box_x + 1, self.box_x + self.box_width - 2)
+            if ([y, x] not in self.snake and [y, x] != self.food and 
+                [y, x] not in self.obstacles and 
+                not any(pu['pos'] == [y, x] for pu in self.power_ups)):
+                
+                power_up = random.choice(power_up_types).copy()
+                power_up['pos'] = [y, x]
+                power_up['timer'] = 200  # Power-up disappears after 200 game ticks
+                return power_up
+    
+    def generate_obstacles(self):
+        """Generate obstacles based on current level"""
+        self.obstacles = []
+        obstacle_count = min(self.level - 1, 5)  # More obstacles at higher levels
+        
+        for _ in range(obstacle_count):
+            while True:
+                y = random.randint(self.box_y + 2, self.box_y + self.box_height - 3)
+                x = random.randint(self.box_x + 2, self.box_x + self.box_width - 3)
+                if ([y, x] not in self.snake and [y, x] != self.food and 
+                    [y, x] not in self.obstacles):
+                    self.obstacles.append([y, x])
+                    break
     
     def draw_border(self):
         """Draw the modern game border with Unicode box drawing characters"""
@@ -110,6 +164,31 @@ class SnakeGame:
         food_char = '♥'  # Heart symbol for food
         self.stdscr.addstr(self.food[0], self.food[1], food_char, curses.color_pair(3) | curses.A_BOLD)
     
+    def draw_power_ups(self):
+        """Draw all active power-ups"""
+        for power_up in self.power_ups:
+            try:
+                # Use fallback characters if emojis don't work
+                if power_up['type'] == 'slow':
+                    char = 'S'  # Fallback for slow
+                elif power_up['type'] == 'boost':
+                    char = 'B'  # Fallback for boost  
+                elif power_up['type'] == 'trap':
+                    char = 'X'  # Fallback for trap
+                else:
+                    char = '?'
+                    
+                self.stdscr.addstr(power_up['pos'][0], power_up['pos'][1], char, 
+                                 curses.color_pair(power_up['color']) | curses.A_BOLD)
+            except:
+                # If drawing fails, skip this power-up
+                pass
+    
+    def draw_obstacles(self):
+        """Draw all obstacles"""
+        for obstacle in self.obstacles:
+            self.stdscr.addstr(obstacle[0], obstacle[1], '█', curses.color_pair(6) | curses.A_BOLD)
+    
     def draw_score(self):
         """Draw the current score with enhanced styling"""
         # Enhanced score display with emojis and styling
@@ -158,16 +237,65 @@ class SnakeGame:
         
         # Check if snake eats food
         ate_food = new_head == self.food
+        ate_power_up = None
+        
+        # Check power-up collision
+        for i, power_up in enumerate(self.power_ups[:]):
+            if new_head == power_up['pos']:
+                ate_power_up = power_up
+                self.power_ups.pop(i)
+                break
         
         if ate_food:
             self.score += 10
             self.food = self.generate_food()
+            
+            # Level progression
+            if self.score >= self.score_for_next_level:
+                self.level += 1
+                self.score_for_next_level += 50  # Increase requirement for next level
+                self.generate_obstacles()  # Add obstacles for new level
+            
+            # Spawn power-up chance
+            if random.random() < self.power_up_spawn_chance:
+                new_power_up = self.generate_power_up()
+                if new_power_up:
+                    self.power_ups.append(new_power_up)
+            
             # Increase speed slightly
             if self.delay > 0.05:
-                self.delay *= 0.95
+                self.delay *= 0.98
         else:
             # Remove tail if no food eaten
             self.snake.pop()
+        
+        # Handle power-up effects
+        if ate_power_up:
+            if ate_power_up['type'] == 'slow':
+                self.delay = self.base_delay * 1.5  # Slow down
+                self.active_power_up = 'slow'
+                self.power_up_duration = ate_power_up['duration']
+                self.score += 5
+            elif ate_power_up['type'] == 'boost':
+                self.delay = self.base_delay * 0.5  # Speed up
+                self.active_power_up = 'boost'
+                self.power_up_duration = ate_power_up['duration']
+                self.score += 15
+            elif ate_power_up['type'] == 'trap':
+                return 'trap'  # Signal trap eaten
+        
+        # Update power-up duration
+        if self.power_up_duration > 0:
+            self.power_up_duration -= 1
+            if self.power_up_duration == 0:
+                self.active_power_up = None
+                self.delay = self.base_delay  # Reset speed
+        
+        # Update power-up timers
+        for power_up in self.power_ups[:]:
+            power_up['timer'] -= 1
+            if power_up['timer'] <= 0:
+                self.power_ups.remove(power_up)
         
         # Add new head
         self.snake.insert(0, new_head)
@@ -175,7 +303,7 @@ class SnakeGame:
         return ate_food
     
     def check_collision(self):
-        """Check for collisions with walls or self"""
+        """Check for collisions with walls, self, or obstacles"""
         head = self.snake[0]
         
         # Check wall collision
@@ -187,13 +315,35 @@ class SnakeGame:
         if head in self.snake[1:]:
             return True
         
+        # Check obstacle collision
+        if head in self.obstacles:
+            return True
+        
         return False
     
+    def load_high_scores(self):
+        """Load high scores from a JSON file"""
+        if os.path.exists(self.high_scores_file):
+            with open(self.high_scores_file, 'r') as file:
+                return json.load(file)
+        return []
+
+    def save_high_score(self, score):
+        """Save a high score to the JSON file"""
+        self.high_scores.append(score)
+        self.high_scores.sort(reverse=True)
+        self.high_scores = self.high_scores[:5]  # Keep top 5 scores
+        with open(self.high_scores_file, 'w') as file:
+            json.dump(self.high_scores, file)
+
     def game_over_screen(self):
         """Display enhanced game over screen"""
+        self.save_high_score(self.score)
+
         self.stdscr.clear()
         
         # Enhanced game over message with emojis
+        high_score_text = "🏅 High Scores: " + ', '.join(map(str, self.high_scores))
         game_over_text = "💀 GAME OVER! 💀"
         final_score_text = f"🏆 Final Score: {self.score}"
         snake_length_text = f"🐍 Snake Length: {len(self.snake)}"
@@ -207,6 +357,10 @@ class SnakeGame:
         self.stdscr.addstr(y_center - 3, x_center - len(game_over_text) // 2, 
                           game_over_text, curses.color_pair(6) | curses.A_BOLD)
         
+        # High scores information
+        self.stdscr.addstr(y_center - 5, x_center - len(high_score_text) // 2, 
+                          high_score_text, curses.color_pair(4) | curses.A_BOLD)
+
         # Score information
         self.stdscr.addstr(y_center - 1, x_center - len(final_score_text) // 2, 
                           final_score_text, curses.color_pair(4) | curses.A_BOLD)
@@ -240,8 +394,10 @@ class SnakeGame:
             
             # Draw game elements
             self.draw_border()
+            self.draw_obstacles()
             self.draw_snake()
             self.draw_food()
+            self.draw_power_ups()
             self.draw_score()
             
             # Refresh screen
@@ -251,8 +407,15 @@ class SnakeGame:
             if not self.get_input():
                 break
             
-            # Move snake
-            self.move_snake()
+            # Move snake and check for trap
+            move_result = self.move_snake()
+            if move_result == 'trap':
+                # Trap eaten - game over
+                if self.game_over_screen():
+                    # Reset game
+                    self.__init__(self.stdscr)
+                else:
+                    break
             
             # Check for collisions
             if self.check_collision():
