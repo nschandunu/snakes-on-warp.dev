@@ -38,8 +38,6 @@ class SoundManager:
             except Exception as e:
                 print(f"Sound initialization failed: {e}")
                 self.sound_initialized = False
-                global SOUND_AVAILABLE
-                SOUND_AVAILABLE = False
     
     def create_sound_effects(self):
         """Generate simple sound effects using pygame"""
