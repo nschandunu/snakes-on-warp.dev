@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-Terminal Snake Game
-A classic snake game that runs in the terminal using Python's curses library.
-Use arrow keys to control the snake. Eat food to grow and increase your score.
-Press 'q' to quit the game.
+CYBER SNAKE - Futuristic Terminal Game
+A next-generation snake game with cyberpunk aesthetics, particle effects,
+and advanced UI/UX features. Experience the future of terminal gaming!
+
+Controls:
+  ↑↓←→  Move snake
+  SPACE  Pause/Resume
+  T      Cycle themes
+  M      Toggle music
+  ESC/Q  Quit
+  R      Restart
 """
 
 import curses
@@ -11,8 +18,90 @@ import random
 import time
 import json
 import os
+import math
+import threading
+from datetime import datetime
 from rich.console import Console
 from rich.theme import Theme
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+class Particle:
+    """Individual particle for visual effects"""
+    def __init__(self, x, y, char='*', color=3, velocity=[0, 0], lifetime=30):
+        self.x = x
+        self.y = y
+        self.char = char
+        self.color = color
+        self.velocity = velocity
+        self.lifetime = lifetime
+        self.max_lifetime = lifetime
+        self.age = 0
+    
+    def update(self):
+        """Update particle position and age"""
+        self.x += self.velocity[0]
+        self.y += self.velocity[1]
+        self.age += 1
+        return self.age < self.lifetime
+    
+    def get_char(self):
+        """Get character based on age for fading effect"""
+        fade_ratio = 1 - (self.age / self.lifetime)
+        if fade_ratio > 0.7:
+            return '★'
+        elif fade_ratio > 0.4:
+            return '✦'
+        elif fade_ratio > 0.2:
+            return '·'
+        else:
+            return '`'
+
+class ParticleSystem:
+    """Manages particle effects"""
+    def __init__(self):
+        self.particles = []
+    
+    def add_explosion(self, x, y, count=8):
+        """Add explosion particles"""
+        for i in range(count):
+            angle = (2 * math.pi * i) / count
+            velocity = [math.cos(angle) * 0.3, math.sin(angle) * 0.5]
+            self.particles.append(Particle(x, y, '★', random.choice([3, 4, 6]), velocity, 25))
+    
+    def add_trail(self, x, y, direction):
+        """Add trail particles behind snake head"""
+        opposite_dir = [-direction[0] * 0.2, -direction[1] * 0.2]
+        self.particles.append(Particle(x, y, '·', 2, opposite_dir, 10))
+    
+    def add_sparkle(self, x, y):
+        """Add sparkle effect for power-ups"""
+        chars = ['✦', '✧', '★', '☆']
+        colors = [2, 3, 4, 6]
+        for _ in range(3):
+            offset_x = random.uniform(-0.5, 0.5)
+            offset_y = random.uniform(-0.5, 0.5)
+            self.particles.append(Particle(
+                x + offset_x, y + offset_y, 
+                random.choice(chars), 
+                random.choice(colors), 
+                [0, 0], 15
+            ))
+    
+    def update(self, box_y, box_x, box_height, box_width):
+        """Update all particles"""
+        self.particles = [p for p in self.particles if p.update() and 
+                         box_y < p.y < box_y + box_height and 
+                         box_x < p.x < box_x + box_width]
+    
+    def draw(self, stdscr):
+        """Draw all particles"""
+        for particle in self.particles:
+            try:
+                y, x = int(particle.y), int(particle.x)
+                char = particle.get_char()
+                stdscr.addstr(y, x, char, curses.color_pair(particle.color))
+            except:
+                pass  # Skip particles that can't be drawn
 
 # Sound system imports
 try:
@@ -169,42 +258,67 @@ class SnakeGame:
         self.high_scores_file = "high_scores.json"
         self.high_scores = self.load_high_scores()
         
-        # Theme and skin system
+        # Futuristic cyberpunk theme system
         self.themes = {
-            'classic': {
-                'name': 'Classic',
-                'snake_head': '●', 'snake_body': '●',
-                'food': '♥', 'border': '═║╔╗╚╝',
-                'colors': {'head': 2, 'body': 1, 'food': 3, 'border': 5}
+            'cyberpunk': {
+                'name': '🔮 CYBERPUNK 2077',
+                'snake_head': '◈', 'snake_body': '◇',
+                'food': '⧫', 'border': '━┃┏┓┗┛',
+                'colors': {'head': 6, 'body': 2, 'food': 4, 'border': 3},
+                'effects': ['neon_glow', 'scanner_lines']
             },
-            'retro': {
-                'name': 'Retro', 
-                'snake_head': '▓', 'snake_body': '▒',
-                'food': '◆', 'border': '▬│┌┐└┘',
-                'colors': {'head': 4, 'body': 2, 'food': 6, 'border': 1}
-            },
-            'modern': {
-                'name': 'Modern',
-                'snake_head': '◉', 'snake_body': '○',
-                'food': '✦', 'border': '━┃┏┓┗┛',
-                'colors': {'head': 6, 'body': 5, 'food': 4, 'border': 2}
-            },
-            'minimal': {
-                'name': 'Minimal',
-                'snake_head': '■', 'snake_body': '□',
-                'food': '●', 'border': '─│╭╮╰╯',
-                'colors': {'head': 7, 'body': 7, 'food': 1, 'border': 7}
-            },
-            'neon': {
-                'name': 'Neon',
+            'matrix': {
+                'name': '🟢 MATRIX CODE',
                 'snake_head': '⬢', 'snake_body': '⬡',
-                'food': '⭐', 'border': '═║╔╗╚╝',
-                'colors': {'head': 6, 'body': 2, 'food': 4, 'border': 3}
+                'food': '◉', 'border': '▓▓▓▓▓▓',
+                'colors': {'head': 2, 'body': 1, 'food': 6, 'border': 2},
+                'effects': ['digital_rain', 'glitch']
+            },
+            'tron': {
+                'name': '💙 TRON LEGACY',
+                'snake_head': '●', 'snake_body': '○',
+                'food': '◆', 'border': '═║╔╗╚╝',
+                'colors': {'head': 2, 'body': 6, 'food': 4, 'border': 2},
+                'effects': ['grid_lines', 'pulse']
+            },
+            'hologram': {
+                'name': '🌈 HOLOGRAM',
+                'snake_head': '⬢', 'snake_body': '⬣',
+                'food': '✧', 'border': '━┃┏┓┗┛',
+                'colors': {'head': 6, 'body': 3, 'food': 5, 'border': 4},
+                'effects': ['rainbow', 'flicker']
+            },
+            'vaporwave': {
+                'name': '🌸 VAPORWAVE',
+                'snake_head': '◉', 'snake_body': '◎',
+                'food': '★', 'border': '─│╭╮╰╯',
+                'colors': {'head': 5, 'body': 4, 'food': 6, 'border': 3},
+                'effects': ['synthwave', 'gradient']
             }
         }
         
-        self.current_theme = 'classic'
+        self.current_theme = 'cyberpunk'
         self.theme_cycling = False
+        
+        # Particle system for visual effects
+        self.particle_system = ParticleSystem()
+        self.animation_frame = 0
+        self.glitch_effect = False
+        self.pulse_counter = 0
+        
+        # Advanced UI features
+        self.game_state = 'playing'  # 'playing', 'paused', 'menu'
+        self.fps_counter = 0
+        self.last_fps_time = time.time()
+        self.current_fps = 0
+        self.paused = False
+        
+        # Enhanced visual effects
+        self.screen_shake = 0
+        self.flash_effect = 0
+        self.rainbow_offset = 0
+        self.digital_rain = []
+        self.scanner_line_y = 0
         
         # Initialize sound system
         self.sound_manager = SoundManager()
@@ -404,28 +518,158 @@ class SnakeGame:
         for obstacle in self.obstacles:
             self.stdscr.addstr(obstacle[0], obstacle[1], '█', curses.color_pair(6) | curses.A_BOLD)
     
+    def draw_visual_effects(self):
+        """Draw advanced visual effects based on current theme"""
+        theme = self.themes[self.current_theme]
+        effects = theme.get('effects', [])
+        
+        # Update animation frame
+        self.animation_frame = (self.animation_frame + 1) % 60
+        self.pulse_counter = (self.pulse_counter + 1) % 30
+        
+        # Scanner lines effect (cyberpunk)
+        if 'scanner_lines' in effects:
+            self.scanner_line_y = (self.scanner_line_y + 0.5) % self.box_height
+            y = int(self.box_y + self.scanner_line_y)
+            for x in range(self.box_x + 1, self.box_x + self.box_width - 1):
+                try:
+                    # Only draw if position is empty
+                    char = self.stdscr.inch(y, x) & 0xFF
+                    if char == ord(' '):
+                        self.stdscr.addstr(y, x, '─', curses.color_pair(6) | curses.A_DIM)
+                except:
+                    pass
+        
+        # Digital rain effect (matrix)
+        if 'digital_rain' in effects:
+            if len(self.digital_rain) < 10:
+                for _ in range(3):
+                    x = random.randint(self.box_x + 1, self.box_x + self.box_width - 2)
+                    self.digital_rain.append({'x': x, 'y': self.box_y + 1, 'char': random.choice('01'), 'life': 20})
+            
+            # Update and draw rain
+            for rain in self.digital_rain[:]:
+                try:
+                    self.stdscr.addstr(int(rain['y']), rain['x'], rain['char'], 
+                                     curses.color_pair(2) | curses.A_DIM)
+                    rain['y'] += 0.3
+                    rain['life'] -= 1
+                    if rain['life'] <= 0 or rain['y'] >= self.box_y + self.box_height - 1:
+                        self.digital_rain.remove(rain)
+                except:
+                    self.digital_rain.remove(rain)
+        
+        # Grid lines effect (tron)
+        if 'grid_lines' in effects and self.animation_frame % 15 == 0:
+            for y in range(self.box_y + 3, self.box_y + self.box_height - 1, 4):
+                for x in range(self.box_x + 1, self.box_x + self.box_width - 1, 2):
+                    try:
+                        char = self.stdscr.inch(y, x) & 0xFF
+                        if char == ord(' '):
+                            self.stdscr.addstr(y, x, '·', curses.color_pair(6) | curses.A_DIM)
+                    except:
+                        pass
+        
+        # Pulse effect around snake head
+        if 'pulse' in effects:
+            head = self.snake[0]
+            pulse_radius = 1 if self.pulse_counter < 15 else 0
+            if pulse_radius > 0:
+                for dy in [-1, 0, 1]:
+                    for dx in [-1, 0, 1]:
+                        if dy == 0 and dx == 0:
+                            continue
+                        try:
+                            y, x = head[0] + dy, head[1] + dx
+                            if (self.box_y < y < self.box_y + self.box_height - 1 and
+                                self.box_x < x < self.box_x + self.box_width - 1):
+                                char = self.stdscr.inch(y, x) & 0xFF
+                                if char == ord(' '):
+                                    self.stdscr.addstr(y, x, '·', curses.color_pair(2) | curses.A_DIM)
+                        except:
+                            pass
+        
+        # Rainbow effect (hologram)
+        if 'rainbow' in effects:
+            self.rainbow_offset = (self.rainbow_offset + 1) % 7
+        
+        # Glitch effect
+        if 'glitch' in effects and random.random() < 0.02:
+            self.glitch_effect = 5
+        
+        if self.glitch_effect > 0:
+            self.glitch_effect -= 1
+            # Randomly distort some characters
+            for _ in range(3):
+                y = random.randint(self.box_y + 1, self.box_y + self.box_height - 2)
+                x = random.randint(self.box_x + 1, self.box_x + self.box_width - 2)
+                try:
+                    glitch_chars = ['▓', '▒', '░', '█']
+                    self.stdscr.addstr(y, x, random.choice(glitch_chars), 
+                                     curses.color_pair(random.randint(1, 6)))
+                except:
+                    pass
+    
     def draw_score(self):
-        """Draw the current score with enhanced styling"""
-        # Enhanced score display with emojis and styling
-        score_text = f"🏆 Score: {self.score}"
-        length_text = f"🐍 Length: {len(self.snake)}"
-        speed_indicator = "⚡" * max(1, 5 - int(self.delay * 50))  # Speed indicator
-        speed_text = f"Speed: {speed_indicator}"
+        """Draw the current score with enhanced cyberpunk styling"""
+        theme = self.themes[self.current_theme]
+        theme_name = theme['name']
         
-        # Display score and stats
-        self.stdscr.addstr(0, 2, score_text, curses.color_pair(4) | curses.A_BOLD)
-        self.stdscr.addstr(0, 20, length_text, curses.color_pair(1) | curses.A_BOLD)
+        # Calculate FPS
+        current_time = time.time()
+        if current_time - self.last_fps_time >= 1.0:
+            self.current_fps = self.fps_counter
+            self.fps_counter = 0
+            self.last_fps_time = current_time
+        else:
+            self.fps_counter += 1
         
-        # Only show speed if there's enough room
-        if self.width > 50:
-            self.stdscr.addstr(0, 40, speed_text, curses.color_pair(2) | curses.A_BOLD)
+        # Enhanced cyberpunk HUD
+        score_text = f"◢◤ SCORE: {self.score:04d} ◥◣"
+        length_text = f"◢◤ LENGTH: {len(self.snake):02d} ◥◣"
+        level_text = f"◢◤ LEVEL: {self.level:02d} ◥◣"
         
-        # Enhanced instructions with emojis
-        instructions = "🎮 Use ↑↓←→ arrows to move • Press 'q' to quit"
+        # Advanced stats
+        speed_percentage = int((1 - (self.delay / self.base_delay)) * 100)
+        speed_text = f"◢◤ SPEED: {speed_percentage:02d}% ◥◣"
+        
+        # Display theme name
+        self.stdscr.addstr(0, 2, theme_name, curses.color_pair(6) | curses.A_BOLD)
+        
+        # Main stats line
+        stats_y = 1
+        self.stdscr.addstr(stats_y, 2, score_text, curses.color_pair(4) | curses.A_BOLD)
+        
+        if self.width > 40:
+            self.stdscr.addstr(stats_y, 25, length_text, curses.color_pair(1) | curses.A_BOLD)
+        
+        if self.width > 60:
+            self.stdscr.addstr(stats_y, 45, level_text, curses.color_pair(2) | curses.A_BOLD)
+        
+        if self.width > 80:
+            self.stdscr.addstr(stats_y, 65, speed_text, curses.color_pair(3) | curses.A_BOLD)
+        
+        # Power-up status
+        if self.active_power_up:
+            power_text = f"⚡ {self.active_power_up.upper()}: {self.power_up_duration}"
+            self.stdscr.addstr(0, self.width - len(power_text) - 2, power_text, 
+                             curses.color_pair(5) | curses.A_BOLD)
+        
+        # Pause indicator
+        if self.paused:
+            pause_text = "⏸️  PAUSED  ⏸️"
+            self.stdscr.addstr(self.height // 2, self.width // 2 - len(pause_text) // 2, 
+                             pause_text, curses.color_pair(6) | curses.A_BOLD | curses.A_BLINK)
+        
+        # Enhanced cyberpunk instructions
+        instructions = "◢ SPACE:Pause ◤ T:Theme ◢ M:Audio ◤ ESC/Q:Quit ◢ R:Restart ◤"
         max_len = self.width - 4
         if len(instructions) > max_len:
-            instructions = "Use arrow keys to move • 'q' to quit"
-        self.stdscr.addstr(self.height - 1, 2, instructions[:max_len], curses.color_pair(7))
+            instructions = "SPACE:Pause • T:Theme • Q:Quit"
+        
+        # Draw instructions with cyberpunk styling
+        self.stdscr.addstr(self.height - 1, (self.width - len(instructions)) // 2, 
+                          instructions[:max_len], curses.color_pair(7) | curses.A_DIM)
     
     def cycle_theme(self):
         """Cycle through available themes"""
@@ -435,22 +679,59 @@ class SnakeGame:
         self.current_theme = theme_names[next_index]
     
     def get_input(self):
-        """Get user input and update direction"""
-        self.stdscr.timeout(int(self.delay * 1000))  # Convert to milliseconds
+        """Get user input with enhanced cyberpunk controls"""
+        if self.paused:
+            self.stdscr.timeout(-1)  # Blocking input when paused
+        else:
+            self.stdscr.timeout(int(self.delay * 1000))  # Convert to milliseconds
+        
         key = self.stdscr.getch()
         
-        if key == ord('q'):
+        # Quit commands
+        if key == ord('q') or key == 27:  # 27 is ESC
             return False
-        elif key == ord('t'):  # Theme switching
+        
+        # Pause/Resume
+        elif key == ord(' '):
+            self.paused = not self.paused
+            return True
+        
+        # Restart game
+        elif key == ord('r') or key == ord('R'):
+            self.__init__(self.stdscr)
+            return True
+        
+        # Theme switching
+        elif key == ord('t') or key == ord('T'):
             self.cycle_theme()
-        elif key == curses.KEY_UP and self.direction != [1, 0]:
-            self.direction = [-1, 0]
-        elif key == curses.KEY_DOWN and self.direction != [-1, 0]:
-            self.direction = [1, 0]
-        elif key == curses.KEY_LEFT and self.direction != [0, 1]:
-            self.direction = [0, -1]
-        elif key == curses.KEY_RIGHT and self.direction != [0, -1]:
-            self.direction = [0, 1]
+            # Add sparkle effect when changing themes
+            head = self.snake[0]
+            self.particle_system.add_sparkle(head[1], head[0])
+        
+        # Toggle sound
+        elif key == ord('m') or key == ord('M'):
+            enabled = self.sound_manager.toggle_sound()
+            # Visual feedback for sound toggle (optional)
+            
+        # Movement controls (only when not paused)
+        elif not self.paused:
+            if key == curses.KEY_UP and self.direction != [1, 0]:
+                self.direction = [-1, 0]
+                # Add trail particle
+                head = self.snake[0]
+                self.particle_system.add_trail(head[1], head[0], self.direction)
+            elif key == curses.KEY_DOWN and self.direction != [-1, 0]:
+                self.direction = [1, 0]
+                head = self.snake[0]
+                self.particle_system.add_trail(head[1], head[0], self.direction)
+            elif key == curses.KEY_LEFT and self.direction != [0, 1]:
+                self.direction = [0, -1]
+                head = self.snake[0]
+                self.particle_system.add_trail(head[1], head[0], self.direction)
+            elif key == curses.KEY_RIGHT and self.direction != [0, -1]:
+                self.direction = [0, 1]
+                head = self.snake[0]
+                self.particle_system.add_trail(head[1], head[0], self.direction)
         
         return True
     
@@ -636,23 +917,53 @@ class SnakeGame:
             if not self.get_input():
                 break
             
-            # Move snake and check for trap
-            move_result = self.move_snake()
-            if move_result == 'trap':
-                # Trap eaten - game over
-                if self.game_over_screen():
-                    # Reset game
-                    self.__init__(self.stdscr)
-                else:
-                    break
+            # Skip movement and effects when paused
+            if not self.paused:
+                # Move snake and check for trap
+                move_result = self.move_snake()
+                if move_result == 'trap':
+                    # Add explosion effect for trap
+                    head = self.snake[0]
+                    self.particle_system.add_explosion(head[1], head[0], 12)
+                    # Play collision sound and show explosion
+                    self.sound_manager.play_sound('collision')
+                    self.stdscr.refresh()
+                    time.sleep(0.5)  # Brief pause to show explosion
+                    
+                    if self.game_over_screen():
+                        # Reset game
+                        self.__init__(self.stdscr)
+                    else:
+                        break
+                
+                # Check for collisions
+                if self.check_collision():
+                    # Add explosion effect for collision
+                    head = self.snake[0]
+                    self.particle_system.add_explosion(head[1], head[0], 10)
+                    # Play collision sound and show explosion
+                    self.sound_manager.play_sound('collision')
+                    self.stdscr.refresh()
+                    time.sleep(0.5)  # Brief pause to show explosion
+                    
+                    if self.game_over_screen():
+                        # Reset game
+                        self.__init__(self.stdscr)
+                    else:
+                        break
+                
+                # Add sparkle effects when eating food
+                if move_result is True:  # Food was eaten
+                    self.particle_system.add_sparkle(self.food[1], self.food[0])
             
-            # Check for collisions
-            if self.check_collision():
-                if self.game_over_screen():
-                    # Reset game
-                    self.__init__(self.stdscr)
-                else:
-                    break
+            # Update particle system
+            self.particle_system.update(self.box_y, self.box_x, self.box_height, self.box_width)
+            
+            # Draw visual effects
+            self.draw_visual_effects()
+            
+            # Draw particles
+            self.particle_system.draw(self.stdscr)
 
 
 def main(stdscr):
