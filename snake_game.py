@@ -11,6 +11,158 @@ import random
 import time
 import json
 import os
+from rich.console import Console
+from rich.theme import Theme
+
+# Sound system imports
+try:
+    import pygame
+    SOUND_AVAILABLE = True
+except ImportError:
+    SOUND_AVAILABLE = False
+    print("pygame not found. Install with 'pip install pygame' for sound effects.")
+
+class SoundManager:
+    """Manages all sound effects for the game"""
+    def __init__(self):
+        self.enabled = True
+        self.sounds = {}
+        self.sound_initialized = False
+        
+        if SOUND_AVAILABLE:
+            try:
+                pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=512)
+                pygame.mixer.init()
+                self.sound_initialized = True
+                self.create_sound_effects()
+            except Exception as e:
+                print(f"Sound initialization failed: {e}")
+                self.sound_initialized = False
+                global SOUND_AVAILABLE
+                SOUND_AVAILABLE = False
+    
+    def create_sound_effects(self):
+        """Generate simple sound effects using pygame"""
+        if not self.sound_initialized:
+            return
+            
+        try:
+            import numpy as np
+            
+            # Sample rate
+            sample_rate = 22050
+            
+            # Create eat sound (short beep)
+            duration = 0.1
+            frequency = 800
+            frames = int(duration * sample_rate)
+            arr = np.zeros((frames, 2))
+            
+            for i in range(frames):
+                wave = 4096 * np.sin(2 * np.pi * frequency * i / sample_rate)
+                # Apply fade out envelope
+                envelope = max(0, 1 - (i / frames))
+                arr[i][0] = wave * envelope
+                arr[i][1] = wave * envelope
+            
+            self.sounds['eat'] = pygame.sndarray.make_sound(arr.astype(np.int16))
+            
+            # Create power-up sound (ascending beep)
+            duration = 0.15
+            frames = int(duration * sample_rate)
+            arr = np.zeros((frames, 2))
+            
+            for i in range(frames):
+                progress = i / frames
+                frequency = 600 + (400 * progress)  # Rising frequency
+                wave = 3000 * np.sin(2 * np.pi * frequency * i / sample_rate)
+                envelope = max(0, 1 - (i / frames) ** 0.5)
+                arr[i][0] = wave * envelope
+                arr[i][1] = wave * envelope
+            
+            self.sounds['powerup'] = pygame.sndarray.make_sound(arr.astype(np.int16))
+            
+            # Create collision sound (harsh buzz)
+            duration = 0.2
+            frames = int(duration * sample_rate)
+            arr = np.zeros((frames, 2))
+            
+            for i in range(frames):
+                # Mix multiple frequencies for harsh sound
+                wave1 = 2000 * np.sin(2 * np.pi * 220 * i / sample_rate)
+                wave2 = 2000 * np.sin(2 * np.pi * 150 * i / sample_rate) 
+                wave3 = 1000 * np.sin(2 * np.pi * 100 * i / sample_rate)
+                wave = wave1 + wave2 + wave3
+                envelope = max(0, 1 - (i / frames))
+                arr[i][0] = wave * envelope
+                arr[i][1] = wave * envelope
+            
+            self.sounds['collision'] = pygame.sndarray.make_sound(arr.astype(np.int16))
+            
+            # Create level up sound (triumphant chord)
+            duration = 0.3
+            frames = int(duration * sample_rate)
+            arr = np.zeros((frames, 2))
+            
+            for i in range(frames):
+                # Major chord frequencies
+                wave1 = 1500 * np.sin(2 * np.pi * 523 * i / sample_rate)  # C
+                wave2 = 1500 * np.sin(2 * np.pi * 659 * i / sample_rate)  # E
+                wave3 = 1500 * np.sin(2 * np.pi * 784 * i / sample_rate)  # G
+                wave = (wave1 + wave2 + wave3) / 3
+                envelope = max(0, 1 - (i / frames) ** 2)
+                arr[i][0] = wave * envelope
+                arr[i][1] = wave * envelope
+            
+            self.sounds['levelup'] = pygame.sndarray.make_sound(arr.astype(np.int16))
+            
+        except ImportError:
+            # If numpy is not available, create simple tones
+            self.create_simple_sounds()
+        except Exception as e:
+            print(f"Failed to create sound effects: {e}")
+    
+    def create_simple_sounds(self):
+        """Create simple sounds without numpy"""
+        import array
+        import math
+        
+        sample_rate = 22050
+        
+        # Simple eat sound
+        duration = 0.1
+        frames = int(duration * sample_rate)
+        arr = array.array('h', [0] * frames * 2)
+        
+        for i in range(frames):
+            wave = int(4096 * math.sin(2 * math.pi * 800 * i / sample_rate))
+            envelope = max(0, 1 - (i / frames))
+            wave = int(wave * envelope)
+            arr[i * 2] = wave
+            arr[i * 2 + 1] = wave
+        
+        sound_buffer = bytes(arr)
+        self.sounds['eat'] = pygame.mixer.Sound(buffer=sound_buffer)
+        
+        # Add other simple sounds...
+        self.sounds['powerup'] = self.sounds['eat']  # Reuse for simplicity
+        self.sounds['collision'] = self.sounds['eat']
+        self.sounds['levelup'] = self.sounds['eat']
+    
+    def play_sound(self, sound_name):
+        """Play a sound effect"""
+        if not self.enabled or not self.sound_initialized or sound_name not in self.sounds:
+            return
+            
+        try:
+            self.sounds[sound_name].play()
+        except Exception as e:
+            print(f"Failed to play sound {sound_name}: {e}")
+    
+    def toggle_sound(self):
+        """Toggle sound on/off"""
+        self.enabled = not self.enabled
+        return self.enabled
 
 class SnakeGame:
     def __init__(self, stdscr):
@@ -19,6 +171,59 @@ class SnakeGame:
         self.high_scores_file = "high_scores.json"
         self.high_scores = self.load_high_scores()
         
+        # Theme and skin system
+        self.themes = {
+            'classic': {
+                'name': 'Classic',
+                'snake_head': '●', 'snake_body': '●',
+                'food': '♥', 'border': '═║╔╗╚╝',
+                'colors': {'head': 2, 'body': 1, 'food': 3, 'border': 5}
+            },
+            'retro': {
+                'name': 'Retro', 
+                'snake_head': '▓', 'snake_body': '▒',
+                'food': '◆', 'border': '▬│┌┐└┘',
+                'colors': {'head': 4, 'body': 2, 'food': 6, 'border': 1}
+            },
+            'modern': {
+                'name': 'Modern',
+                'snake_head': '◉', 'snake_body': '○',
+                'food': '✦', 'border': '━┃┏┓┗┛',
+                'colors': {'head': 6, 'body': 5, 'food': 4, 'border': 2}
+            },
+            'minimal': {
+                'name': 'Minimal',
+                'snake_head': '■', 'snake_body': '□',
+                'food': '●', 'border': '─│╭╮╰╯',
+                'colors': {'head': 7, 'body': 7, 'food': 1, 'border': 7}
+            },
+            'neon': {
+                'name': 'Neon',
+                'snake_head': '⬢', 'snake_body': '⬡',
+                'food': '⭐', 'border': '═║╔╗╚╝',
+                'colors': {'head': 6, 'body': 2, 'food': 4, 'border': 3}
+            }
+        }
+        
+        self.current_theme = 'classic'
+        self.theme_cycling = False
+        
+        # Initialize sound system
+        self.sound_manager = SoundManager()
+        
+        # Initialize rich console with custom theme
+        self.console = Console()
+        self.theme = Theme({
+            "border": "blue",
+            "snake_head": "cyan bold",
+            "snake_body": "green bold",
+            "food": "red bold",
+            "score": "yellow bold",
+            "text": "white"
+        })
+
+        self.console.push_theme(self.theme)
+
         # Initialize colors
         curses.curs_set(0)  # Hide cursor
         curses.init_pair(1, curses.COLOR_GREEN, curses.COLOR_BLACK)  # Snake body
@@ -113,36 +318,43 @@ class SnakeGame:
                     break
     
     def draw_border(self):
-        """Draw the modern game border with Unicode box drawing characters"""
-        # Modern Unicode box drawing characters
-        horizontal = '═'
-        vertical = '║'
-        top_left = '╔'
-        top_right = '╗'
-        bottom_left = '╚'
-        bottom_right = '╝'
+        """Draw themed game border"""
+        theme = self.themes[self.current_theme]
+        border_chars = theme['border']
         
-        # Draw horizontal borders with style
+        # Extract border characters
+        horizontal = border_chars[0]
+        vertical = border_chars[1]
+        top_left = border_chars[2]
+        top_right = border_chars[3]
+        bottom_left = border_chars[4]
+        bottom_right = border_chars[5]
+        
+        border_color = theme['colors']['border']
+        
+        # Draw horizontal borders with theme style
         for x in range(self.box_x + 1, self.box_x + self.box_width - 1):
-            self.stdscr.addstr(self.box_y, x, horizontal, curses.color_pair(5) | curses.A_BOLD)
-            self.stdscr.addstr(self.box_y + self.box_height - 1, x, horizontal, curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(self.box_y, x, horizontal, curses.color_pair(border_color) | curses.A_BOLD)
+            self.stdscr.addstr(self.box_y + self.box_height - 1, x, horizontal, curses.color_pair(border_color) | curses.A_BOLD)
         
-        # Draw vertical borders with style
+        # Draw vertical borders with theme style
         for y in range(self.box_y + 1, self.box_y + self.box_height - 1):
-            self.stdscr.addstr(y, self.box_x, vertical, curses.color_pair(5) | curses.A_BOLD)
-            self.stdscr.addstr(y, self.box_x + self.box_width - 1, vertical, curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(y, self.box_x, vertical, curses.color_pair(border_color) | curses.A_BOLD)
+            self.stdscr.addstr(y, self.box_x + self.box_width - 1, vertical, curses.color_pair(border_color) | curses.A_BOLD)
         
-        # Draw corners with style
-        self.stdscr.addstr(self.box_y, self.box_x, top_left, curses.color_pair(5) | curses.A_BOLD)
-        self.stdscr.addstr(self.box_y, self.box_x + self.box_width - 1, top_right, curses.color_pair(5) | curses.A_BOLD)
-        self.stdscr.addstr(self.box_y + self.box_height - 1, self.box_x, bottom_left, curses.color_pair(5) | curses.A_BOLD)
-        self.stdscr.addstr(self.box_y + self.box_height - 1, self.box_x + self.box_width - 1, bottom_right, curses.color_pair(5) | curses.A_BOLD)
+        # Draw corners with theme style
+        self.stdscr.addstr(self.box_y, self.box_x, top_left, curses.color_pair(border_color) | curses.A_BOLD)
+        self.stdscr.addstr(self.box_y, self.box_x + self.box_width - 1, top_right, curses.color_pair(border_color) | curses.A_BOLD)
+        self.stdscr.addstr(self.box_y + self.box_height - 1, self.box_x, bottom_left, curses.color_pair(border_color) | curses.A_BOLD)
+        self.stdscr.addstr(self.box_y + self.box_height - 1, self.box_x + self.box_width - 1, bottom_right, curses.color_pair(border_color) | curses.A_BOLD)
     
     def draw_snake(self):
-        """Draw the snake with modern Unicode characters"""
+        """Draw themed snake"""
+        theme = self.themes[self.current_theme]
+        
         for i, segment in enumerate(self.snake):
             if i == 0:
-                # Draw head with modern Unicode character based on direction
+                # Draw head with directional character or theme head
                 if self.direction == [0, 1]:    # Moving right
                     head_char = '▶'
                 elif self.direction == [0, -1]:  # Moving left
@@ -152,17 +364,22 @@ class SnakeGame:
                 elif self.direction == [1, 0]:   # Moving down
                     head_char = '▼'
                 else:
-                    head_char = '●'  # Default head
-                self.stdscr.addstr(segment[0], segment[1], head_char, curses.color_pair(2) | curses.A_BOLD)
+                    head_char = theme['snake_head']  # Theme head as fallback
+                
+                head_color = theme['colors']['head']
+                self.stdscr.addstr(segment[0], segment[1], head_char, curses.color_pair(head_color) | curses.A_BOLD)
             else:
-                # Draw body with modern Unicode character
-                self.stdscr.addstr(segment[0], segment[1], '●', curses.color_pair(1) | curses.A_BOLD)
+                # Draw body with theme character
+                body_char = theme['snake_body']
+                body_color = theme['colors']['body']
+                self.stdscr.addstr(segment[0], segment[1], body_char, curses.color_pair(body_color) | curses.A_BOLD)
     
     def draw_food(self):
-        """Draw the food with modern styling"""
-        # Use a more appealing food character
-        food_char = '♥'  # Heart symbol for food
-        self.stdscr.addstr(self.food[0], self.food[1], food_char, curses.color_pair(3) | curses.A_BOLD)
+        """Draw themed food"""
+        theme = self.themes[self.current_theme]
+        food_char = theme['food']
+        food_color = theme['colors']['food']
+        self.stdscr.addstr(self.food[0], self.food[1], food_char, curses.color_pair(food_color) | curses.A_BOLD)
     
     def draw_power_ups(self):
         """Draw all active power-ups"""
@@ -212,6 +429,13 @@ class SnakeGame:
             instructions = "Use arrow keys to move • 'q' to quit"
         self.stdscr.addstr(self.height - 1, 2, instructions[:max_len], curses.color_pair(7))
     
+    def cycle_theme(self):
+        """Cycle through available themes"""
+        theme_names = list(self.themes.keys())
+        current_index = theme_names.index(self.current_theme)
+        next_index = (current_index + 1) % len(theme_names)
+        self.current_theme = theme_names[next_index]
+    
     def get_input(self):
         """Get user input and update direction"""
         self.stdscr.timeout(int(self.delay * 1000))  # Convert to milliseconds
@@ -219,6 +443,8 @@ class SnakeGame:
         
         if key == ord('q'):
             return False
+        elif key == ord('t'):  # Theme switching
+            self.cycle_theme()
         elif key == curses.KEY_UP and self.direction != [1, 0]:
             self.direction = [-1, 0]
         elif key == curses.KEY_DOWN and self.direction != [-1, 0]:
@@ -247,11 +473,13 @@ class SnakeGame:
                 break
         
         if ate_food:
+            self.sound_manager.play_sound('eat')  # Play eating sound
             self.score += 10
             self.food = self.generate_food()
             
             # Level progression
             if self.score >= self.score_for_next_level:
+                self.sound_manager.play_sound('levelup')  # Play level up sound
                 self.level += 1
                 self.score_for_next_level += 50  # Increase requirement for next level
                 self.generate_obstacles()  # Add obstacles for new level
@@ -272,16 +500,19 @@ class SnakeGame:
         # Handle power-up effects
         if ate_power_up:
             if ate_power_up['type'] == 'slow':
+                self.sound_manager.play_sound('powerup')  # Play power-up sound
                 self.delay = self.base_delay * 1.5  # Slow down
                 self.active_power_up = 'slow'
                 self.power_up_duration = ate_power_up['duration']
                 self.score += 5
             elif ate_power_up['type'] == 'boost':
+                self.sound_manager.play_sound('powerup')  # Play power-up sound
                 self.delay = self.base_delay * 0.5  # Speed up
                 self.active_power_up = 'boost'
                 self.power_up_duration = ate_power_up['duration']
                 self.score += 15
             elif ate_power_up['type'] == 'trap':
+                self.sound_manager.play_sound('collision')  # Play trap sound
                 return 'trap'  # Signal trap eaten
         
         # Update power-up duration
